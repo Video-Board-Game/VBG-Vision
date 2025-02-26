@@ -17,6 +17,7 @@ https://medium.com/@pacogarcia3/calculate-x-y-z-real-world-coordinates-from-imag
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <std_msgs/msg/string.hpp>
 #include <geometry_msgs/msg/point.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
 #include <pcl_conversions/pcl_conversions.h>
@@ -32,6 +33,7 @@ https://medium.com/@pacogarcia3/calculate-x-y-z-real-world-coordinates-from-imag
 #include <pcl/filters/extract_indices.h>
 #include <pcl/filters/passthrough.h>
 #include <pcl/filters/crop_box.h>
+#include <pcl/common/centroid.h>
 // #include <pcl/features/boundary.h>
 // #include <pcl/search/kdtree.h>
 // #include <pcl/features/normal_3d.h>
@@ -50,8 +52,9 @@ public:
     PointCloudClusterDetector() : Node("vbg_vision") {
         // ROS parameters
         this->declare_parameter<std::string>("pointcloud_topic", "/camera/camera/depth/color/points");
-        this->declare_parameter<std::string>("coord_topic", "/joisie_vision/detected_object_centroid");
+        this->declare_parameter<std::string>("coord_topic", "/detected_object_centroid");
         this->declare_parameter<std::string>("cluster_topic", "/detected_cluster");
+        this->declare_parameter<std::string>("centroid_topic","/extract_centroid");
         this->declare_parameter<std::string>("camera_info_topic_depth", "/camera/camera/aligned_depth_to_color/camera_info");
         this->declare_parameter<std::string>("camera_info_topic_color", "/camera/camera/color/camera_info");
         this->declare_parameter<std::string>("camera_depth_topic", "/camera/camera/aligned_depth_to_color/image_raw");
@@ -63,17 +66,19 @@ public:
         this->declare_parameter<int>("ransac_max_iterations", 1000);
         this->declare_parameter<double>("ransac_distance_threshold", 0.01);
         this->declare_parameter<std::string>("header_frame","camera_color_optical_frame"); // TODO: get this directly from subscribed topic
-        this->declare_parameter<std::string>("header_frame_drone","drone_frame");
+        this->declare_parameter<std::string>("header_frame_arm","arm_frame");
         this->declare_parameter<std::string>("header_frame_depth","camera_depth_optical_frame");
         this->declare_parameter<double>("cluster_tolerance", 0.02);
         this->declare_parameter<int>("min_cluster_size", 100);
         this->declare_parameter<int>("max_cluster_size", 25000);
         this->declare_parameter<double>("target_point_tolerance",0.02);
+        this->declare_parameter<std::string>("state_topic","state");
 
         // Retrieve ROS parameters
         pointcloud_topic = this->get_parameter("pointcloud_topic").as_string();
         coord_topic = this->get_parameter("coord_topic").as_string();
         cluster_topic = this->get_parameter("cluster_topic").as_string();
+        centroid_topic = this->get_parameter("centroid_topic").as_string();
         camera_info_topic_depth = this->get_parameter("camera_info_topic_depth").as_string();
         camera_info_topic_color = this->get_parameter("camera_info_topic_color").as_string();
         camera_depth_topic = this->get_parameter("camera_depth_topic").as_string();
@@ -85,12 +90,13 @@ public:
         ransac_max_iterations = this->get_parameter("ransac_max_iterations").as_int();
         ransac_distance_threshold = this->get_parameter("ransac_distance_threshold").as_double();
         header_frame = this->get_parameter("header_frame").as_string();
-        header_frame_drone = this->get_parameter("header_frame_drone").as_string(); 
+        header_frame_arm = this->get_parameter("header_frame_arm").as_string(); 
         header_frame_depth = this->get_parameter("header_frame_depth").as_string();
         cluster_tolerance = this->get_parameter("cluster_tolerance").as_double();
         min_cluster_size = this->get_parameter("min_cluster_size").as_int();
         max_cluster_size = this->get_parameter("max_cluster_size").as_int();
         target_point_tolerance = this->get_parameter("target_point_tolerance").as_double();
+        state_topic = this->get_parameter("state_topic").as_string();
 
         // Subscriptions + Publishers 
         pointcloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
@@ -125,7 +131,10 @@ public:
             });
         camera_depth_subscription_ = this->create_subscription<sensor_msgs::msg::Image>(
             camera_depth_topic, 10, std::bind(&PointCloudClusterDetector::depth_img_callback, this, std::placeholders::_1));
+        state_sub_ = this->create_subscription<std_msgs::msg::String>(
+            state_topic, 10, std::bind(&PointCloudClusterDetector::state_callback,this, std::placeholders::_1));
         cluster_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(cluster_topic, 10);
+        centroid_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>(centroid_topic,10);
         if(VISUALIZE){
             point_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>("/target_coords", 10);
             crop_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/visualize/crop", 10);
@@ -140,7 +149,8 @@ public:
     }
 
 private:
-    std::string pointcloud_topic, coord_topic, cluster_topic, camera_info_topic_depth, camera_info_topic_color, camera_depth_topic, header_frame, header_frame_drone, header_frame_depth;
+    std::string pointcloud_topic, coord_topic, cluster_topic, camera_info_topic_depth, camera_info_topic_color, camera_depth_topic, header_frame, 
+        header_frame_arm, header_frame_depth, state_topic, state, centroid_topic;
     double crop_radius, sor_stddev_mul_thresh, voxel_leaf_size, ransac_distance_threshold, cluster_tolerance, target_point_tolerance;
     double fx_, fy_, cx_, cy_;
     bool VISUALIZE = false;
@@ -149,14 +159,20 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr coord_sub_;
     rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_color_subscription_, camera_info_depth_subscription_;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr camera_depth_subscription_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr state_sub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cluster_pub_, crop_pub_, sor_pub_, voxel_pub_, plane_pub_;    
-    rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr point_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr point_pub_, centroid_pub_;
     sensor_msgs::msg::PointCloud2::SharedPtr pointcloud_data_;
     sensor_msgs::msg::Image::SharedPtr depth_img_data_;
     std::pair<int, int> latest_2d_point_;
     int image_width_depth_, image_height_depth_, image_width_color_, image_height_color_;
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+
+    void state_callback(const std_msgs::msg::String::SharedPtr msg){
+        state = msg->data;
+        RCLCPP_INFO(this->get_logger(), "Received State: '%s'", state.c_str());
+    }
 
     void pointcloud_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
         RCLCPP_DEBUG(this->get_logger(), "Point cloud received!");
@@ -244,7 +260,7 @@ private:
         double y = (v - cy_) * depth_value / fy_;
         pcl::PointXYZ target_point = pcl::PointXYZ(x,y,depth_value);
 
-        // Transform 3D point to drone frame
+        // Transform 3D point to arm frame
         geometry_msgs::msg::PointStamped msg, msg_tf2;
         msg.header.frame_id = header_frame;
         msg.header.stamp.nanosec = 0;
@@ -265,7 +281,7 @@ private:
         RCLCPP_INFO(this->get_logger(), "Converted 3D Point: (%.3f, %.3f, %.3f)", target_point.x, target_point.y, target_point.z);
 
 
-        // Convert PointCloud2 to PCL PointCloud and transform to drone frame
+        // Convert PointCloud2 to PCL PointCloud and transform to arm frame
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_(new pcl::PointCloud<pcl::PointXYZ>());
         pcl::fromROSMsg(*pointcloud_data_, *cloud_);
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>(transform_point_cloud(cloud_)));
@@ -352,23 +368,23 @@ private:
 
             sensor_msgs::msg::PointCloud2 cloud_msg;
             pcl::toROSMsg(*cloud_crop, cloud_msg);
-            cloud_msg.header.frame_id = header_frame_drone; 
+            cloud_msg.header.frame_id = header_frame_arm; 
             cloud_msg.header.stamp = this->now();
             crop_pub_->publish(cloud_msg); 
 
 
             pcl::toROSMsg(*cloud_sor, cloud_msg);
-            cloud_msg.header.frame_id = header_frame_drone; 
+            cloud_msg.header.frame_id = header_frame_arm; 
             cloud_msg.header.stamp = this->now();
             sor_pub_->publish(cloud_msg);
 
             pcl::toROSMsg(*cloud_voxel,cloud_msg);
-            cloud_msg.header.frame_id = header_frame_drone; 
+            cloud_msg.header.frame_id = header_frame_arm; 
             cloud_msg.header.stamp = this->now();            
             voxel_pub_->publish(cloud_msg);
 
             pcl::toROSMsg(*cloud_processed_inverted,cloud_msg);
-            cloud_msg.header.frame_id = header_frame_drone; 
+            cloud_msg.header.frame_id = header_frame_arm; 
             cloud_msg.header.stamp = this->now();
             plane_pub_->publish(cloud_msg);
         }
@@ -377,11 +393,26 @@ private:
         auto cluster = find_object_cluster(cloud_processed, target_point);
         if (cluster) {
             RCLCPP_INFO(this->get_logger(), "Cluster found with %lu points", cluster->points.size());
-            sensor_msgs::msg::PointCloud2 cluster_msg;
-            pcl::toROSMsg(*cluster, cluster_msg);
-            cluster_msg.header.frame_id = header_frame_drone;
-            cluster_msg.header.stamp = this->now();
-            cluster_pub_->publish(cluster_msg); 
+            // Trigger optimal_grasp node if state is grasping
+            if(state == "grasping"){ // TODO
+                sensor_msgs::msg::PointCloud2 cluster_msg;
+                pcl::toROSMsg(*cluster, cluster_msg);
+                cluster_msg.header.frame_id = header_frame_arm;
+                cluster_msg.header.stamp = this->now();
+                cluster_pub_->publish(cluster_msg); 
+            }
+            // Publish centroid regardless of state if this node was called
+            Eigen::Vector4f centroid;
+            pcl::compute3DCentroid(*cluster, centroid);
+            geometry_msgs::msg::PointStamped centroid_msg;
+            centroid_msg.header.frame_id = header_frame_arm;
+            centroid_msg.header.stamp.nanosec = 0;
+            centroid_msg.header.stamp.sec = 0;
+            centroid_msg.point.x = centroid[0];
+            centroid_msg.point.y = centroid[1];
+            centroid_msg.point.z = centroid[2];
+
+            centroid_pub_->publish(centroid_msg);
         } else {
             RCLCPP_INFO(this->get_logger(), "No cluster :/");
         }
@@ -434,7 +465,7 @@ private:
         try {
             // Lookup the transform from child_frame to parent_frame
             geometry_msgs::msg::TransformStamped transform = tf_buffer_->lookupTransform(
-                target_frame, // i.e. world or drone frame
+                target_frame, // i.e. world or arm frame
                 source_frame, // i.e. camera frame
                 rclcpp::Time(0) // latest transform
             );
@@ -452,10 +483,10 @@ private:
         }
     }
 
-    // Transform a point from the camera's point frame ("camera_depth_optical_frame") to the drone frame ("drone_frame") 
+    // Transform a point from the camera's point frame ("camera_depth_optical_frame") to the arm frame ("arm_frame") 
     geometry_msgs::msg::PointStamped transform_point(geometry_msgs::msg::PointStamped msg){
         // Lookup the transform from child_frame to parent_frame
-        geometry_msgs::msg::TransformStamped transform = get_transform(header_frame_drone, msg.header.frame_id);
+        geometry_msgs::msg::TransformStamped transform = get_transform(header_frame_arm, msg.header.frame_id);
 
         // Transform the point from the child frame to the parent frame
         geometry_msgs::msg::PointStamped transformed_point;
@@ -469,7 +500,7 @@ private:
         return transformed_point;
     }
 
-    // Transform a point cloud from the camera's point frame ("camera_depth_optical_frame") to the drone frame ("drone_frame") 
+    // Transform a point cloud from the camera's point frame ("camera_depth_optical_frame") to the arm frame ("arm_frame") 
     pcl::PointCloud<pcl::PointXYZ> transform_point_cloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr& input_cloud)
     {
         pcl::PointCloud<pcl::PointXYZ> output_cloud;
