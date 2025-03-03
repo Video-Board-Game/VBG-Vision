@@ -74,15 +74,17 @@ def generate_launch_description():
             FindPackageShare('realsense2_camera').find('realsense2_camera') + '/launch/rs_launch.py',
             launch_arguments=
                 {
-                    "depth_module.depth_profile":"424,240,15",
-                    "depth_module.exposure":"8000",
+                    "depth_module.depth_profile":"424,240,6",
+                    "rgb_camera.color_profile":"424,240,6",
+                    "depth_module.infra_profile":"424,240,6",
+                    # "depth_module.exposure":"8000",
                     "enable_sync":"true",
                     "pointcloud.enable":"true",
                     "enable_color":"true",
                     "initial_reset":"true",
-                    "rgb_camera.color_profile":"424,240,15",
                     "align_depth.enable":"true",
                     "reconnect_timeout":"15.",
+                    "global_time_enabled":"false",
                 }.items() 
         ),
     ])
