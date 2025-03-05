@@ -59,7 +59,7 @@ public:
         this->declare_parameter<std::string>("camera_info_topic_color", "/camera/camera/color/camera_info");
         this->declare_parameter<std::string>("camera_depth_topic", "/camera/camera/aligned_depth_to_color/image_raw");
         this->declare_parameter<bool>("visualize", false);
-        this->declare_parameter<double>("crop_radius", 0.2);
+        this->declare_parameter<double>("crop_radius", 0.03);
         this->declare_parameter<int>("sor_mean_k", 50);
         this->declare_parameter<double>("sor_stddev_mul_thresh", 1.0);
         this->declare_parameter<double>("voxel_leaf_size", 0.01);
@@ -394,7 +394,7 @@ private:
         if (cluster) {
             RCLCPP_INFO(this->get_logger(), "Cluster found with %lu points", cluster->points.size());
             // Trigger optimal_grasp node if state is grasping
-            if(state == "grasping"){ // TODO
+            if(VISUALIZE){ // TODO
                 sensor_msgs::msg::PointCloud2 cluster_msg;
                 pcl::toROSMsg(*cluster, cluster_msg);
                 cluster_msg.header.frame_id = header_frame_arm;
@@ -414,7 +414,16 @@ private:
 
             centroid_pub_->publish(centroid_msg);
         } else {
+            // if no cluster, publish 2D->3D point as approximate target
             RCLCPP_INFO(this->get_logger(), "No cluster :/");
+            geometry_msgs::msg::PointStamped point_msg;
+            point_msg.header.frame_id = header_frame_arm;
+            point_msg.header.stamp.nanosec = 0;
+            point_msg.header.stamp.sec = 0;
+            point_msg.point.x = target_point.x;
+            point_msg.point.y = target_point.y;
+            point_msg.point.z = target_point.z;
+            centroid_pub_->publish(point_msg);
         }
     }
 

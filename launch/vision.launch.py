@@ -17,7 +17,7 @@ def generate_launch_description():
         DeclareLaunchArgument('camera_info_topic_color', default_value='/camera/camera/color/camera_info', description='Camera color image info topic'),
         DeclareLaunchArgument('camera_depth_topic', default_value='/camera/camera/aligned_depth_to_color/image_raw', description='Camera depth image topic'),
         DeclareLaunchArgument('visualize', default_value='false', description='Enable visualization in RViz of filters and normals'),
-        DeclareLaunchArgument('crop_radius', default_value='0.2', description='Crop box radius'),
+        DeclareLaunchArgument('crop_radius', default_value='0.03', description='Crop box radius'),
         DeclareLaunchArgument('sor_mean_k', default_value='50', description='SOR mean K'),
         DeclareLaunchArgument('sor_stddev_mul_thresh', default_value='1.0', description='SOR stddev multiplier threshold'),
         DeclareLaunchArgument('voxel_leaf_size', default_value='0.01', description='Voxel leaf size'),
