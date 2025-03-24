@@ -59,6 +59,7 @@ public:
         this->declare_parameter<std::string>("camera_info_topic_color", "/camera/camera/color/camera_info");
         this->declare_parameter<std::string>("camera_depth_topic", "/camera/camera/aligned_depth_to_color/image_raw");
         this->declare_parameter<bool>("visualize", false);
+        this->declare_parameter<bool>("extract", false);
         this->declare_parameter<double>("crop_radius", 0.03);
         this->declare_parameter<int>("sor_mean_k", 50);
         this->declare_parameter<double>("sor_stddev_mul_thresh", 1.0);
@@ -83,6 +84,7 @@ public:
         camera_info_topic_color = this->get_parameter("camera_info_topic_color").as_string();
         camera_depth_topic = this->get_parameter("camera_depth_topic").as_string();
         VISUALIZE = this->get_parameter("visualize").as_bool();
+        EXTRACT = this->get_parameter("extract").as_bool();
         crop_radius = this->get_parameter("crop_radius").as_double();
         sor_mean_k = this->get_parameter("sor_mean_k").as_int();
         sor_stddev_mul_thresh = this->get_parameter("sor_stddev_mul_thresh").as_double();
@@ -153,7 +155,7 @@ private:
         header_frame_arm, header_frame_depth, state_topic, state, centroid_topic;
     double crop_radius, sor_stddev_mul_thresh, voxel_leaf_size, ransac_distance_threshold, cluster_tolerance, target_point_tolerance;
     double fx_, fy_, cx_, cy_;
-    bool VISUALIZE = false;
+    bool VISUALIZE = false, EXTRACT = false;
     int sor_mean_k, ransac_max_iterations, min_cluster_size, max_cluster_size;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
     rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr coord_sub_;
@@ -278,79 +280,58 @@ private:
             point_pub_->publish(msg_tf2);
         }
 
-        RCLCPP_INFO(this->get_logger(), "Converted 3D Point: (%.3f, %.3f, %.3f)", target_point.x, target_point.y, target_point.z);
-
-
-        // Convert PointCloud2 to PCL PointCloud and transform to arm frame
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_(new pcl::PointCloud<pcl::PointXYZ>());
-        pcl::fromROSMsg(*pointcloud_data_, *cloud_);
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>(transform_point_cloud(cloud_)));
-
-
-        // Filter cloud
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_processed(new pcl::PointCloud<pcl::PointXYZ>);
-
-        // Crop cloud to region around point of interest
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_crop(new pcl::PointCloud<pcl::PointXYZ>());
-        pcl::CropBox<pcl::PointXYZ> crop;
-        crop.setInputCloud(cloud);
-        float radius = crop_radius; // meters
-        crop.setMin(Eigen::Vector4f(target_point.x - radius, target_point.y - radius, target_point.z - radius, 0));
-        crop.setMax(Eigen::Vector4f(target_point.x + radius, target_point.y + radius, target_point.z + radius, 0));
-        crop.filter(*cloud_crop);
-        RCLCPP_DEBUG(this->get_logger(), "Crop box found with %lu points", cloud_crop->points.size());
-
-        // Remove noise using a Statistical Outlier Removal filter
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_sor(new pcl::PointCloud<pcl::PointXYZ>);
-        pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
-        sor.setInputCloud(cloud_crop);
-        sor.setMeanK(sor_mean_k);  // Number of neighbors to analyze for each point
-        sor.setStddevMulThresh(sor_stddev_mul_thresh);  // Standard deviation multiplier
-        sor.filter(*cloud_sor);
-        RCLCPP_DEBUG(this->get_logger(), "SOR filtered, remaining cloud found with %lu points", cloud_sor->points.size());
-
-        // Downsample point cloud using VoxelGrid filter
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_voxel(new pcl::PointCloud<pcl::PointXYZ>);
-        pcl::VoxelGrid<pcl::PointXYZ> vg;
-        vg.setInputCloud(cloud_sor);
-        vg.setLeafSize(voxel_leaf_size,voxel_leaf_size,voxel_leaf_size); 
-        vg.filter(*cloud_voxel);
-        RCLCPP_DEBUG(this->get_logger(), "Voxel sampled with %lu points", cloud_voxel->points.size());
-
-        // Remove ground (plane segmentation)
-        pcl::SACSegmentation<pcl::PointXYZ> seg;
-        pcl::PointIndices::Ptr inliers (new pcl::PointIndices);
-        pcl::ModelCoefficients::Ptr coeff (new pcl::ModelCoefficients);
-        seg.setOptimizeCoefficients (true);
-        seg.setModelType (pcl::SACMODEL_PLANE);
-        seg.setMethodType (pcl::SAC_RANSAC);
-        seg.setMaxIterations (ransac_max_iterations); 
-        seg.setDistanceThreshold (ransac_distance_threshold);
-        // Segment the largest planar component from the cropped cloud
-        seg.setInputCloud (cloud_voxel);
-        seg.segment (*inliers, *coeff);
-        // coefficients = coeff; // Store plane coefficients if desired
-        if (inliers->indices.size () == 0)
-        {
-            RCLCPP_WARN(this->get_logger(), "Failed to estimate planar model");
+        if(!EXTRACT){
+            centroid_pub_->publish(msg_tf2);
         }
-        pcl::ExtractIndices<pcl::PointXYZ> extract;
-        extract.setInputCloud (cloud_voxel);
-        extract.setIndices(inliers);
-        extract.setNegative (true); // false = return plane
-        extract.filter (*cloud_processed);
-        RCLCPP_DEBUG(this->get_logger(), "Plane removed, cloud found with %lu points", cloud_processed->points.size());
+        else{
 
-        if(VISUALIZE){
-            pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_processed_inverted(new pcl::PointCloud<pcl::PointXYZ>);
-            // Invert remove ground (plane segmentation)
+            RCLCPP_INFO(this->get_logger(), "Converted 3D Point: (%.3f, %.3f, %.3f)", target_point.x, target_point.y, target_point.z);
+
+
+            // Convert PointCloud2 to PCL PointCloud and transform to arm frame
+            pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_(new pcl::PointCloud<pcl::PointXYZ>());
+            pcl::fromROSMsg(*pointcloud_data_, *cloud_);
+            pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>(transform_point_cloud(cloud_)));
+
+
+            // Filter cloud
+            pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_processed(new pcl::PointCloud<pcl::PointXYZ>);
+
+            // Crop cloud to region around point of interest
+            pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_crop(new pcl::PointCloud<pcl::PointXYZ>());
+            pcl::CropBox<pcl::PointXYZ> crop;
+            crop.setInputCloud(cloud);
+            float radius = crop_radius; // meters
+            crop.setMin(Eigen::Vector4f(target_point.x - radius, target_point.y - radius, target_point.z - radius, 0));
+            crop.setMax(Eigen::Vector4f(target_point.x + radius, target_point.y + radius, target_point.z + radius, 0));
+            crop.filter(*cloud_crop);
+            RCLCPP_DEBUG(this->get_logger(), "Crop box found with %lu points", cloud_crop->points.size());
+
+            // Remove noise using a Statistical Outlier Removal filter
+            pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_sor(new pcl::PointCloud<pcl::PointXYZ>);
+            pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
+            sor.setInputCloud(cloud_crop);
+            sor.setMeanK(sor_mean_k);  // Number of neighbors to analyze for each point
+            sor.setStddevMulThresh(sor_stddev_mul_thresh);  // Standard deviation multiplier
+            sor.filter(*cloud_sor);
+            RCLCPP_DEBUG(this->get_logger(), "SOR filtered, remaining cloud found with %lu points", cloud_sor->points.size());
+
+            // Downsample point cloud using VoxelGrid filter
+            pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_voxel(new pcl::PointCloud<pcl::PointXYZ>);
+            pcl::VoxelGrid<pcl::PointXYZ> vg;
+            vg.setInputCloud(cloud_sor);
+            vg.setLeafSize(voxel_leaf_size,voxel_leaf_size,voxel_leaf_size); 
+            vg.filter(*cloud_voxel);
+            RCLCPP_DEBUG(this->get_logger(), "Voxel sampled with %lu points", cloud_voxel->points.size());
+
+            // Remove ground (plane segmentation)
             pcl::SACSegmentation<pcl::PointXYZ> seg;
             pcl::PointIndices::Ptr inliers (new pcl::PointIndices);
             pcl::ModelCoefficients::Ptr coeff (new pcl::ModelCoefficients);
             seg.setOptimizeCoefficients (true);
             seg.setModelType (pcl::SACMODEL_PLANE);
             seg.setMethodType (pcl::SAC_RANSAC);
-            seg.setMaxIterations (ransac_max_iterations);
+            seg.setMaxIterations (ransac_max_iterations); 
             seg.setDistanceThreshold (ransac_distance_threshold);
             // Segment the largest planar component from the cropped cloud
             seg.setInputCloud (cloud_voxel);
@@ -363,67 +344,94 @@ private:
             pcl::ExtractIndices<pcl::PointXYZ> extract;
             extract.setInputCloud (cloud_voxel);
             extract.setIndices(inliers);
-            extract.setNegative (false); // false = return plane
-            extract.filter (*cloud_processed_inverted);
+            extract.setNegative (true); // false = return plane
+            extract.filter (*cloud_processed);
+            RCLCPP_DEBUG(this->get_logger(), "Plane removed, cloud found with %lu points", cloud_processed->points.size());
 
-            sensor_msgs::msg::PointCloud2 cloud_msg;
-            pcl::toROSMsg(*cloud_crop, cloud_msg);
-            cloud_msg.header.frame_id = header_frame_arm; 
-            cloud_msg.header.stamp = this->now();
-            crop_pub_->publish(cloud_msg); 
+            if(VISUALIZE){
+                pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_processed_inverted(new pcl::PointCloud<pcl::PointXYZ>);
+                // Invert remove ground (plane segmentation)
+                pcl::SACSegmentation<pcl::PointXYZ> seg;
+                pcl::PointIndices::Ptr inliers (new pcl::PointIndices);
+                pcl::ModelCoefficients::Ptr coeff (new pcl::ModelCoefficients);
+                seg.setOptimizeCoefficients (true);
+                seg.setModelType (pcl::SACMODEL_PLANE);
+                seg.setMethodType (pcl::SAC_RANSAC);
+                seg.setMaxIterations (ransac_max_iterations);
+                seg.setDistanceThreshold (ransac_distance_threshold);
+                // Segment the largest planar component from the cropped cloud
+                seg.setInputCloud (cloud_voxel);
+                seg.segment (*inliers, *coeff);
+                // coefficients = coeff; // Store plane coefficients if desired
+                if (inliers->indices.size () == 0)
+                {
+                    RCLCPP_WARN(this->get_logger(), "Failed to estimate planar model");
+                }
+                pcl::ExtractIndices<pcl::PointXYZ> extract;
+                extract.setInputCloud (cloud_voxel);
+                extract.setIndices(inliers);
+                extract.setNegative (false); // false = return plane
+                extract.filter (*cloud_processed_inverted);
+
+                sensor_msgs::msg::PointCloud2 cloud_msg;
+                pcl::toROSMsg(*cloud_crop, cloud_msg);
+                cloud_msg.header.frame_id = header_frame_arm; 
+                cloud_msg.header.stamp = this->now();
+                crop_pub_->publish(cloud_msg); 
 
 
-            pcl::toROSMsg(*cloud_sor, cloud_msg);
-            cloud_msg.header.frame_id = header_frame_arm; 
-            cloud_msg.header.stamp = this->now();
-            sor_pub_->publish(cloud_msg);
+                pcl::toROSMsg(*cloud_sor, cloud_msg);
+                cloud_msg.header.frame_id = header_frame_arm; 
+                cloud_msg.header.stamp = this->now();
+                sor_pub_->publish(cloud_msg);
 
-            pcl::toROSMsg(*cloud_voxel,cloud_msg);
-            cloud_msg.header.frame_id = header_frame_arm; 
-            cloud_msg.header.stamp = this->now();            
-            voxel_pub_->publish(cloud_msg);
+                pcl::toROSMsg(*cloud_voxel,cloud_msg);
+                cloud_msg.header.frame_id = header_frame_arm; 
+                cloud_msg.header.stamp = this->now();            
+                voxel_pub_->publish(cloud_msg);
 
-            pcl::toROSMsg(*cloud_processed_inverted,cloud_msg);
-            cloud_msg.header.frame_id = header_frame_arm; 
-            cloud_msg.header.stamp = this->now();
-            plane_pub_->publish(cloud_msg);
-        }
-
-        // Find the object cluster containing this point
-        auto cluster = find_object_cluster(cloud_processed, target_point);
-        if (cluster) {
-            RCLCPP_INFO(this->get_logger(), "Cluster found with %lu points", cluster->points.size());
-            // Trigger optimal_grasp node if state is grasping
-            if(VISUALIZE){ // TODO
-                sensor_msgs::msg::PointCloud2 cluster_msg;
-                pcl::toROSMsg(*cluster, cluster_msg);
-                cluster_msg.header.frame_id = header_frame_arm;
-                cluster_msg.header.stamp = this->now();
-                cluster_pub_->publish(cluster_msg); 
+                pcl::toROSMsg(*cloud_processed_inverted,cloud_msg);
+                cloud_msg.header.frame_id = header_frame_arm; 
+                cloud_msg.header.stamp = this->now();
+                plane_pub_->publish(cloud_msg);
             }
-            // Publish centroid regardless of state if this node was called
-            Eigen::Vector4f centroid;
-            pcl::compute3DCentroid(*cluster, centroid);
-            geometry_msgs::msg::PointStamped centroid_msg;
-            centroid_msg.header.frame_id = header_frame_arm;
-            centroid_msg.header.stamp.nanosec = 0;
-            centroid_msg.header.stamp.sec = 0;
-            centroid_msg.point.x = centroid[0];
-            centroid_msg.point.y = centroid[1];
-            centroid_msg.point.z = centroid[2];
 
-            centroid_pub_->publish(centroid_msg);
-        } else {
-            // if no cluster, publish 2D->3D point as approximate target
-            RCLCPP_INFO(this->get_logger(), "No cluster :/");
-            geometry_msgs::msg::PointStamped point_msg;
-            point_msg.header.frame_id = header_frame_arm;
-            point_msg.header.stamp.nanosec = 0;
-            point_msg.header.stamp.sec = 0;
-            point_msg.point.x = target_point.x;
-            point_msg.point.y = target_point.y;
-            point_msg.point.z = target_point.z;
-            centroid_pub_->publish(point_msg);
+            // Find the object cluster containing this point
+            auto cluster = find_object_cluster(cloud_processed, target_point);
+            if (cluster) {
+                RCLCPP_INFO(this->get_logger(), "Cluster found with %lu points", cluster->points.size());
+                // Trigger optimal_grasp node if state is grasping
+                if(VISUALIZE){ // TODO
+                    sensor_msgs::msg::PointCloud2 cluster_msg;
+                    pcl::toROSMsg(*cluster, cluster_msg);
+                    cluster_msg.header.frame_id = header_frame_arm;
+                    cluster_msg.header.stamp = this->now();
+                    cluster_pub_->publish(cluster_msg); 
+                }
+                // Publish centroid regardless of state if this node was called
+                Eigen::Vector4f centroid;
+                pcl::compute3DCentroid(*cluster, centroid);
+                geometry_msgs::msg::PointStamped centroid_msg;
+                centroid_msg.header.frame_id = header_frame_arm;
+                centroid_msg.header.stamp.nanosec = 0;
+                centroid_msg.header.stamp.sec = 0;
+                centroid_msg.point.x = centroid[0];
+                centroid_msg.point.y = centroid[1];
+                centroid_msg.point.z = centroid[2];
+
+                centroid_pub_->publish(centroid_msg);
+            } else {
+                // if no cluster, publish 2D->3D point as approximate target
+                RCLCPP_INFO(this->get_logger(), "No cluster :/");
+                geometry_msgs::msg::PointStamped point_msg;
+                point_msg.header.frame_id = header_frame_arm;
+                point_msg.header.stamp.nanosec = 0;
+                point_msg.header.stamp.sec = 0;
+                point_msg.point.x = target_point.x;
+                point_msg.point.y = target_point.y;
+                point_msg.point.z = target_point.z;
+                centroid_pub_->publish(point_msg);
+            }
         }
     }
 
