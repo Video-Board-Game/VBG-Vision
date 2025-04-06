@@ -7,6 +7,7 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     return LaunchDescription([
+        # -------------------------------------- VISION NODE --------------------------------------
         # Flags for debugging
         DeclareLaunchArgument('log_level', default_value='INFO', description='Log verbosity level'),
         DeclareLaunchArgument('visualize', default_value='false', description='Enable visualization in RViz of PCL filtered clouds and normals'),
@@ -16,6 +17,7 @@ def generate_launch_description():
         DeclareLaunchArgument('cluster_topic', default_value='/detected_cluster', description='Cluster topic name'),
         DeclareLaunchArgument('pointcloud_topic', default_value='/camera/camera/depth/color/points', description='Pointcloud topic name'),
         DeclareLaunchArgument('coord_topic', default_value='/detected_object_centroid', description='2D centroid target coordinates topic'),
+        DeclareLaunchArgument("centroid_topic", default_value="/detected_centroid", description="Topic for 3D Point from VBG extract_cluster"),
         DeclareLaunchArgument('camera_info_topic_depth', default_value='/camera/camera/aligned_depth_to_color/camera_info', description='Camera depth image info topic'),
         DeclareLaunchArgument('camera_info_topic_color', default_value='/camera/camera/color/camera_info', description='Camera color image info topic'),
         DeclareLaunchArgument('camera_depth_topic', default_value='/camera/camera/aligned_depth_to_color/image_raw', description='Camera depth image topic'),
@@ -43,6 +45,11 @@ def generate_launch_description():
                                3: isotropy index, 4: maximum minimum svd with abs for numeric stability, 5: weighing (1) and (2) equally'),
         DeclareLaunchArgument('variance_neighbors', default_value='4', description='Grasp uncertainty variance neighbors to search'),
         DeclareLaunchArgument('variance_threshold', default_value='0.2', description='Grasp uncertainty variance threshold'),
+
+        # ---------------------------------------- WEB API ----------------------------------------
+        DeclareLaunchArgument('host',default_value='mcalec.dyn.wpi.edu',description="WebSocket host name / IP"),
+        DeclareLaunchArgument('port',default_value='8000',description="WebSocket host port number"),
+
         Node(
             package='vbg-vision',
             executable='vision',
@@ -95,5 +102,18 @@ def generate_launch_description():
                     "reconnect_timeout":"15.",
                     "global_time_enabled":"false",
                 }.items() 
+        ),
+        Node(
+            package='web_api',
+            executable='web_api',
+            name='ros2_web_bridge',
+            output='screen',
+            parameters=[{
+                'host':LaunchConfiguration('host'),
+                'port':LaunchConfiguration('port'),
+                'coord_topic_start':LaunchConfiguration('coord_topic'), # TODO re-write for start and goal coords
+                'coord_topic_goal':LaunchConfiguration('coord_topic'),
+
+            }]
         ),
     ])
