@@ -49,6 +49,7 @@ def generate_launch_description():
         # ---------------------------------------- WEB API ----------------------------------------
         DeclareLaunchArgument('host',default_value='mcalec.dyn.wpi.edu',description="WebSocket host name / IP"),
         DeclareLaunchArgument('port',default_value='8000',description="WebSocket host port number"),
+        DeclareLaunchArgument('camera_image_topic',default_value='/camera/camera/color/image_raw',description="Camera image topic for UI"),
 
         Node(
             package='vbg-vision',
@@ -113,6 +114,7 @@ def generate_launch_description():
                 'port':LaunchConfiguration('port'),
                 'coord_topic_start':LaunchConfiguration('coord_topic'), # TODO re-write for start and goal coords
                 'coord_topic_goal':LaunchConfiguration('coord_topic'),
+                'camera_image_topic':LaunchConfiguration('camera_image_topic'),
 
             }]
         ),

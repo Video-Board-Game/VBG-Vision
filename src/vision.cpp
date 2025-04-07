@@ -422,9 +422,9 @@ private:
      * @brief Converts 2D coordinates from the color image to 3D coordinates in the arm frame.
      */
     void process_coordinates() {
-        // Get 2D coordinate in color image and convert to depth image
-        int u = latest_2d_point_.first * image_width_depth_/image_width_color_;
-        int v = latest_2d_point_.second * image_height_depth_/image_height_color_;
+        // Convert 2D coordinate from pixels [0,100] to color image then to depth image
+        int u = (int)(latest_2d_point_.first * image_width_depth_/100);
+        int v = (int)(latest_2d_point_.second * image_height_depth_/100);
 
         // Convert ROS to OpenCV image
         cv_bridge::CvImagePtr cv_ptr;
