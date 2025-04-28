@@ -60,8 +60,8 @@ def generate_launch_description():
             parameters=[{
                 'cluster_topic': LaunchConfiguration('cluster_topic'),
                 'pointcloud_topic': LaunchConfiguration('pointcloud_topic'),
-                'coord_start_topic': LaunchConfiguration('coord_start_topic'),
-                'coord_goal_topic': LaunchConfiguration('coord_goal_topic'),
+                'coord_topic_start': LaunchConfiguration('coord_topic_start'),
+                'coord_topic_goal': LaunchConfiguration('coord_topic_goal'),
                 'centroid_start_topic':LaunchConfiguration('centroid_start_topic'),
                 'centroid_goal_topic':LaunchConfiguration('centroid_goal_topic'),
                 'camera_info_topic_depth': LaunchConfiguration('camera_info_topic_depth'),
@@ -128,8 +128,8 @@ def generate_launch_description():
             name='state_machine',
             output='screen',
             parameters=[{
-                'start_extract_topic':LaunchConfiguration('coord_start_topic'),
-                'goal_extract_topic':LaunchConfiguration('coord_goal_topic'),
+                'start_extract_topic':LaunchConfiguration('centroid_start_topic'),
+                'goal_extract_topic':LaunchConfiguration('centroid_goal_topic'),
                 # TODO add more as needed
             }]
         ),
