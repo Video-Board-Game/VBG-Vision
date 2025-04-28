@@ -16,8 +16,10 @@ def generate_launch_description():
         # Topic configuration
         DeclareLaunchArgument('cluster_topic', default_value='/detected_cluster', description='Cluster topic name'),
         DeclareLaunchArgument('pointcloud_topic', default_value='/camera/camera/depth/color/points', description='Pointcloud topic name'),
-        DeclareLaunchArgument('coord_topic', default_value='/detected_object_centroid', description='2D centroid target coordinates topic'),
-        DeclareLaunchArgument("centroid_topic", default_value="/detected_centroid", description="Topic for 3D Point from VBG extract_cluster"),
+        DeclareLaunchArgument('coord_topic_start', default_value='/click_2d/start', description='2D center click target coordinates start topic'),
+        DeclareLaunchArgument('coord_topic_goal', default_value='/click_2d/goal', description='2D center click target coordinates goal topic'),
+        DeclareLaunchArgument("centroid_start_topic", default_value="/detected_centroid/start", description="Topic for 3D Point from VBG extract_cluster start"),
+        DeclareLaunchArgument("centroid_goal_topic", default_value="/detected_centroid/goal", description="Topic for 3D Point from VBG extract_cluster goal"),
         DeclareLaunchArgument('camera_info_topic_depth', default_value='/camera/camera/aligned_depth_to_color/camera_info', description='Camera depth image info topic'),
         DeclareLaunchArgument('camera_info_topic_color', default_value='/camera/camera/color/camera_info', description='Camera color image info topic'),
         DeclareLaunchArgument('camera_depth_topic', default_value='/camera/camera/aligned_depth_to_color/image_raw', description='Camera depth image topic'),
@@ -58,8 +60,10 @@ def generate_launch_description():
             parameters=[{
                 'cluster_topic': LaunchConfiguration('cluster_topic'),
                 'pointcloud_topic': LaunchConfiguration('pointcloud_topic'),
-                'coord_topic': LaunchConfiguration('coord_topic'),
-                'centroid_topic':LaunchConfiguration('centroid_topic'),
+                'coord_start_topic': LaunchConfiguration('coord_start_topic'),
+                'coord_goal_topic': LaunchConfiguration('coord_goal_topic'),
+                'centroid_start_topic':LaunchConfiguration('centroid_start_topic'),
+                'centroid_goal_topic':LaunchConfiguration('centroid_goal_topic'),
                 'camera_info_topic_depth': LaunchConfiguration('camera_info_topic_depth'),
                 'camera_info_topic_color': LaunchConfiguration('camera_info_topic_color'),
                 'camera_depth_topic': LaunchConfiguration('camera_depth_topic'),
@@ -112,10 +116,21 @@ def generate_launch_description():
             parameters=[{
                 'host':LaunchConfiguration('host'),
                 'port':LaunchConfiguration('port'),
-                'coord_topic_start':LaunchConfiguration('coord_topic'), # TODO re-write for start and goal coords
-                'coord_topic_goal':LaunchConfiguration('coord_topic'),
+                'coord_topic_start':LaunchConfiguration('coord_topic_start'),
+                'coord_topic_goal':LaunchConfiguration('coord_topic_goal'),
                 'camera_image_topic':LaunchConfiguration('camera_image_topic'),
 
+            }]
+        ),
+        Node(
+            package='state_machine',
+            executable='state_machine',
+            name='state_machine',
+            output='screen',
+            parameters=[{
+                'start_extract_topic':LaunchConfiguration('coord_start_topic'),
+                'goal_extract_topic':LaunchConfiguration('coord_goal_topic'),
+                # TODO add more as needed
             }]
         ),
     ])

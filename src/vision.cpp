@@ -60,17 +60,21 @@ public:
         EXTRACT = this->get_parameter("extract").as_bool();
         // Topics
         this->declare_parameter<std::string>("pointcloud_topic", "/camera/camera/depth/color/points");
-        this->declare_parameter<std::string>("coord_topic", "/detected_object_centroid");
+        this->declare_parameter<std::string>("coord_topic_start", "/click_2d/start");
+        this->declare_parameter<std::string>("coord_topic_goal", "/click_2d/goal");
         this->declare_parameter<std::string>("cluster_topic", "/detected_cluster");
-        this->declare_parameter<std::string>("centroid_topic","/extract_centroid");
+        this->declare_parameter<std::string>("centroid_start_topic","/extract_centroid/start");
+        this->declare_parameter<std::string>("centroid_goal_topic","/extract_centroid/goal");
         this->declare_parameter<std::string>("state_topic","/state");
         this->declare_parameter<std::string>("camera_info_topic_depth", "/camera/camera/aligned_depth_to_color/camera_info");
         this->declare_parameter<std::string>("camera_info_topic_color", "/camera/camera/color/camera_info");
         this->declare_parameter<std::string>("camera_depth_topic", "/camera/camera/aligned_depth_to_color/image_raw");
         pointcloud_topic = this->get_parameter("pointcloud_topic").as_string();
-        coord_topic = this->get_parameter("coord_topic").as_string();
+        coord_topic_start = this->get_parameter("coord_topic_start").as_string();
+        coord_topic_goal = this->get_parameter("coord_topic_goal").as_string();
         cluster_topic = this->get_parameter("cluster_topic").as_string();
-        centroid_topic = this->get_parameter("centroid_topic").as_string();
+        centroid_start_topic = this->get_parameter("centroid_start_topic").as_string();
+        centroid_goal_topic = this->get_parameter("centroid_goal_topic").as_string();
         state_topic = this->get_parameter("state_topic").as_string();
         camera_info_topic_depth = this->get_parameter("camera_info_topic_depth").as_string();
         camera_info_topic_color = this->get_parameter("camera_info_topic_color").as_string();
@@ -107,8 +111,10 @@ public:
         // =============================== PUBLISHERS + SUBSCRIBERS ===============================
         pointcloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
             pointcloud_topic, 10, std::bind(&PointCloudClusterDetector::pointcloud_callback, this, std::placeholders::_1));
-        coord_sub_ = this->create_subscription<geometry_msgs::msg::Point>(
-            coord_topic, 10, std::bind(&PointCloudClusterDetector::coord_callback, this, std::placeholders::_1));
+        coord_start_sub_ = this->create_subscription<geometry_msgs::msg::Point>(
+            coord_topic_start, 10, std::bind(&PointCloudClusterDetector::coord_start_callback, this, std::placeholders::_1));
+        coord_goal_sub_ = this->create_subscription<geometry_msgs::msg::Point>(
+            coord_topic_goal, 10, std::bind(&PointCloudClusterDetector::coord_goal_callback, this, std::placeholders::_1));
         // Retrieve depth camera intrinsics once 
         camera_info_depth_subscription_ = this->create_subscription<sensor_msgs::msg::CameraInfo>(
             camera_info_topic_depth, 10, 
@@ -142,7 +148,8 @@ public:
         state_sub_ = this->create_subscription<std_msgs::msg::String>(
             state_topic, 10, std::bind(&PointCloudClusterDetector::state_callback,this, std::placeholders::_1));
         cluster_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(cluster_topic, 10);
-        centroid_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>(centroid_topic,10);
+        centroid_start_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>(centroid_start_topic,10);
+        centroid_goal_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>(centroid_goal_topic,10);
         // Visualization publishers enabled by parameter
         if(VISUALIZE){
             point_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>("/target_coords", 10);
@@ -162,7 +169,7 @@ private:
     // Topic for receiving raw point cloud data
     std::string pointcloud_topic;
     // Topic for receiving 2D detected object centroid coordinates
-    std::string coord_topic;
+    std::string coord_topic_start, coord_topic_goal;
     // Topic for publishing detected clusters
     std::string cluster_topic;
     // Topic for receiving depth camera info (intrinsics / calibration parameters)
@@ -178,7 +185,7 @@ private:
     // Topic for tracking the state of the task manager
     std::string state_topic;
     // Topic for publishing extracted 3D centroid positions
-    std::string centroid_topic;
+    std::string centroid_start_topic, centroid_goal_topic;
     // PCL Filters ----------------------------------------
     // Radius for cropping point cloud
     double crop_radius;
@@ -210,7 +217,7 @@ private:
     // Subscription for raw point cloud data
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
     // Subscription for receiving 2D detected object centroid coordinates
-    rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr coord_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr coord_start_sub_, coord_goal_sub_;
     // Subscriptions for receiving camera calibration data
     rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_color_subscription_;
     rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_depth_subscription_;
@@ -227,7 +234,7 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr plane_pub_;    // Publishes segmented planes
     // Publishers for detected points
     rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr point_pub_;    // Publishes detected object points
-    rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr centroid_pub_; // Publishes detected centroid positions
+    rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr centroid_start_pub_, centroid_goal_pub_; // Publishes detected centroid positions
     // Data storage from subscribers-----------------------
     // Stores the latest received point cloud data
     sensor_msgs::msg::PointCloud2::SharedPtr pointcloud_data_;
@@ -286,6 +293,14 @@ private:
         depth_img_data_ = msg;
     }
 
+    void coord_start_callback(const geometry_msgs::msg::Point::SharedPtr msg){
+        coord_callback(msg,centroid_start_pub_);
+    }
+
+    void coord_goal_callback(const geometry_msgs::msg::Point::SharedPtr msg){
+        coord_callback(msg,centroid_goal_pub_);
+    }
+
     /**
      * @brief Callback function for processing 2D coordinate input.
      * 
@@ -295,7 +310,7 @@ private:
      * 
      * @param msg Shared pointer to the received 2D point message.
      */
-    void coord_callback(const geometry_msgs::msg::Point::SharedPtr msg) {
+    void coord_callback(const geometry_msgs::msg::Point::SharedPtr msg, std::shared_ptr<rclcpp::Publisher<geometry_msgs::msg::PointStamped>> pub_) {
         // Store 2D point
         latest_2d_point_ = std::make_pair(static_cast<int>(msg->x), static_cast<int>(msg->y));
         RCLCPP_DEBUG(this->get_logger(), "New 2D point received: (%d, %d)", latest_2d_point_.first, latest_2d_point_.second);
@@ -304,7 +319,7 @@ private:
         if (pointcloud_data_ && depth_img_data_ && image_width_depth_ && image_width_color_) {
             // Process point and report processing time
             auto t1 = std::chrono::high_resolution_clock::now();
-            process_coordinates();
+            process_coordinates(pub_);
             auto t2 = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double,std::milli> elapsed = t2-t1;
             RCLCPP_INFO(this->get_logger(),"Cluster_time elapsed from receiving point: %f",elapsed.count());            
@@ -421,7 +436,7 @@ private:
     /**
      * @brief Converts 2D coordinates from the color image to 3D coordinates in the arm frame.
      */
-    void process_coordinates() {
+    void process_coordinates(std::shared_ptr<rclcpp::Publisher<geometry_msgs::msg::PointStamped>> pub_) {
         // Convert 2D coordinate from pixels [0,100] to color image then to depth image
         int u = (int)(latest_2d_point_.first * image_width_depth_/100);
         int v = (int)(latest_2d_point_.second * image_height_depth_/100);
@@ -471,7 +486,7 @@ private:
         }
 
         if(!EXTRACT){
-            centroid_pub_->publish(msg_tf2);
+            pub_->publish(msg_tf2);
         }
         else{
 
@@ -607,7 +622,7 @@ private:
                 centroid_msg.point.y = centroid[1];
                 centroid_msg.point.z = centroid[2];
 
-                centroid_pub_->publish(centroid_msg);
+                pub_->publish(centroid_msg);
             } else {
                 // if no cluster, publish 2D->3D point as approximate target
                 RCLCPP_INFO(this->get_logger(), "No cluster :/");
@@ -618,7 +633,7 @@ private:
                 point_msg.point.x = target_point.x;
                 point_msg.point.y = target_point.y;
                 point_msg.point.z = target_point.z;
-                centroid_pub_->publish(point_msg);
+                pub_->publish(point_msg);
             }
         }
     }
