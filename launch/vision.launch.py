@@ -128,8 +128,8 @@ def generate_launch_description():
             name='state_machine',
             output='screen',
             parameters=[{
-                'start_extract_topic':LaunchConfiguration('centroid_start_topic'),
-                'goal_extract_topic':LaunchConfiguration('centroid_goal_topic'),
+                'centroid_start_topic':LaunchConfiguration('centroid_start_topic'),
+                'centroid_goal_topic':LaunchConfiguration('centroid_goal_topic'),
                 # TODO add more as needed
             }]
         ),
