@@ -88,8 +88,8 @@ def generate_launch_description():
             package="tf2_ros",
             executable="static_transform_publisher",
             name="static_tf_pub",
-            # Pitch rotation 30 deg + translation
-            arguments = ['--x', '0.1', '--y', '0', '--z', '-0.16', '--yaw', '0', '--pitch', '0.523599', '--roll', '0', '--frame-id', 'arm_frame', '--child-frame-id', 'camera_link']
+            # Pitch rotation 75 deg + translation
+            arguments = ['--x', '0.05', '--y', '0.035', '--z', '0.18', '--yaw', '0', '--pitch', '1.309', '--roll', '0', '--frame-id', 'arm_frame', '--child-frame-id', 'camera_link']
         ),
         IncludeLaunchDescription(
             FindPackageShare('realsense2_camera').find('realsense2_camera') + '/launch/rs_launch.py',
