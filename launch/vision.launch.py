@@ -133,4 +133,10 @@ def generate_launch_description():
                 # TODO add more as needed
             }]
         ),
+        Node(
+            package='board_manipulator',
+            executable='board_arm_node',
+            name='board_manipulator',
+            output='screen',
+        )
     ])
