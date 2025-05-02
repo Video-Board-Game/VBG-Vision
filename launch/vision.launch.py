@@ -89,7 +89,7 @@ def generate_launch_description():
             executable="static_transform_publisher",
             name="static_tf_pub",
             # Pitch rotation 75 deg + translation
-            arguments = ['--x', '0.05', '--y', '0.035', '--z', '0.18', '--yaw', '0', '--pitch', '1.309', '--roll', '0', '--frame-id', 'arm_frame', '--child-frame-id', 'camera_link']
+            arguments = ['--x', '0.15', '--y', '0.045', '--z', '0.48', '--yaw', '0', '--pitch', '1.309', '--roll', '0', '--frame-id', 'arm_frame', '--child-frame-id', 'camera_link']
         ),
         IncludeLaunchDescription(
             FindPackageShare('realsense2_camera').find('realsense2_camera') + '/launch/rs_launch.py',
@@ -98,6 +98,9 @@ def generate_launch_description():
                     "depth_module.depth_profile":"424,240,6",
                     "rgb_camera.color_profile":"424,240,6",
                     "depth_module.infra_profile":"424,240,6",
+                    # "depth_module.depth_profile":"640,360,6",
+                    # "rgb_camera.color_profile":"424,240,6",
+                    # "depth_module.infra_profile":"640,360,6",
                     # "depth_module.exposure":"8000",
                     "enable_sync":"true",
                     "pointcloud.enable":"true",
